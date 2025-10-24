@@ -542,6 +542,7 @@ app.get('/', (c) => {
         <title>HPX Travel Reimbursement</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+        <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     </head>
     <body class="bg-gray-50">
         <div class="min-h-screen py-8 px-4">
@@ -552,6 +553,67 @@ app.get('/', (c) => {
                     <p class="text-sm text-gray-600">Unit No 810-816, 8th Floor, World Trade Tower Sector 16 Noida</p>
                     <p class="text-xs text-gray-500">(CIN NO -U74999MH2018PLC308448)</p>
                     <h2 class="text-xl font-bold text-blue-600 mt-4">TRAVEL REIMBURSEMENT CLAIM FORM</h2>
+                    <p class="text-xs text-gray-500 mt-2" id="autoSaveIndicator"></p>
+                </div>
+
+                <!-- Quick Actions Bar -->
+                <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+                    <div class="flex flex-wrap gap-3 justify-center">
+                        <button onclick="saveDraft()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition">
+                            <i class="fas fa-save mr-2"></i>Save Draft
+                        </button>
+                        <button onclick="loadDraft()" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition">
+                            <i class="fas fa-folder-open mr-2"></i>Load Draft
+                        </button>
+                        <button onclick="clearDraft()" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition">
+                            <i class="fas fa-trash mr-2"></i>Clear Draft
+                        </button>
+                        <button onclick="saveAsTemplate()" class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition">
+                            <i class="fas fa-bookmark mr-2"></i>Save as Template
+                        </button>
+                        <button onclick="document.getElementById('templatesModal').classList.remove('hidden')" 
+                            class="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition">
+                            <i class="fas fa-list mr-2"></i>My Templates
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Receipt Upload Section -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-orange-500 pb-2">
+                        <i class="fas fa-camera mr-2"></i>Upload Receipts (OCR Enabled)
+                    </h3>
+                    <div class="mb-4">
+                        <label class="flex items-center justify-center w-full px-4 py-6 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-100 transition">
+                            <div class="text-center">
+                                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
+                                <p class="text-sm text-gray-600"><strong>Click to upload</strong> or drag and drop</p>
+                                <p class="text-xs text-gray-500 mt-1">PNG, JPG (max 5MB) - OCR will auto-extract amount</p>
+                            </div>
+                            <input type="file" accept="image/*" multiple onchange="handleReceiptUpload(event)" class="hidden">
+                        </label>
+                    </div>
+                    <div id="receiptsContainer" class="mt-4">
+                        <p class="text-gray-500 text-sm">No receipts uploaded yet</p>
+                    </div>
+                </div>
+
+                <!-- Templates Modal -->
+                <div id="templatesModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-gray-800">
+                                <i class="fas fa-bookmark mr-2"></i>My Templates
+                            </h3>
+                            <button onclick="document.getElementById('templatesModal').classList.add('hidden')" 
+                                class="text-gray-500 hover:text-gray-700">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <div id="templatesList">
+                            <p class="text-gray-500 text-sm">No templates saved yet</p>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Main Form -->
