@@ -18,7 +18,7 @@
 ## URLs
 - **Development**: https://3000-imj5aatue1j2tnx8l6w1r-b9b802c4.sandbox.novita.ai
 - **Production**: (Pending Cloudflare deployment)
-- **GitHub**: (To be added after GitHub push)
+- **GitHub**: https://github.com/Khushi6211/Claim-HPX
 
 ## 🚀 NEW FEATURES (Just Added!)
 
