@@ -2,13 +2,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
 import ExcelJS from 'exceljs'
-import { hashPassword, verifyPassword, createSession, verifySession, User } from './auth'
 
-type Bindings = {
-  DB: D1Database;
-}
-
-const app = new Hono<{ Bindings: Bindings }>()
+const app = new Hono()
 
 // Enable CORS for API routes
 app.use('/api/*', cors())
@@ -16,374 +11,7 @@ app.use('/api/*', cors())
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
 
-// ==================== AUTHENTICATION APIs ====================
-
-// Register new user
-app.post('/api/auth/register', async (c) => {
-  try {
-    const { employee_code, employee_name, designation, department, password } = await c.req.json()
-    
-    // Validate input
-    if (!employee_code || !employee_name || !password) {
-      return c.json({ error: 'Missing required fields' }, 400)
-    }
-    
-    if (password.length < 6) {
-      return c.json({ error: 'Password must be at least 6 characters' }, 400)
-    }
-    
-    // Check if user already exists
-    const existing = await c.env.DB.prepare(
-      'SELECT id FROM users WHERE employee_code = ?'
-    ).bind(employee_code).first()
-    
-    if (existing) {
-      return c.json({ error: 'Employee code already registered' }, 400)
-    }
-    
-    // Hash password
-    const password_hash = await hashPassword(password)
-    
-    // Create user
-    const result = await c.env.DB.prepare(`
-      INSERT INTO users (employee_code, employee_name, designation, department, password_hash)
-      VALUES (?, ?, ?, ?, ?)
-    `).bind(employee_code, employee_name, designation || '', department || '', password_hash).run()
-    
-    if (!result.success) {
-      return c.json({ error: 'Failed to create user' }, 500)
-    }
-    
-    // Get created user
-    const user = await c.env.DB.prepare(
-      'SELECT id, employee_code, employee_name, designation, department FROM users WHERE employee_code = ?'
-    ).bind(employee_code).first() as any
-    
-    // Create session
-    const session = createSession({
-      id: user.id,
-      employee_code: user.employee_code,
-      employee_name: user.employee_name,
-      designation: user.designation,
-      department: user.department
-    })
-    
-    // Store session
-    await c.env.DB.prepare(`
-      INSERT INTO sessions (user_id, session_token, expires_at)
-      VALUES (?, ?, ?)
-    `).bind(user.id, session.token, session.expiresAt.toISOString()).run()
-    
-    return c.json({
-      success: true,
-      user: session.user,
-      token: session.token
-    })
-    
-  } catch (error) {
-    console.error('Registration error:', error)
-    return c.json({ error: 'Registration failed' }, 500)
-  }
-})
-
-// Login
-app.post('/api/auth/login', async (c) => {
-  try {
-    const { employee_code, password } = await c.req.json()
-    
-    if (!employee_code || !password) {
-      return c.json({ error: 'Missing employee code or password' }, 400)
-    }
-    
-    // Get user
-    const user = await c.env.DB.prepare(
-      'SELECT * FROM users WHERE employee_code = ?'
-    ).bind(employee_code).first() as any
-    
-    if (!user) {
-      return c.json({ error: 'Invalid employee code or password' }, 401)
-    }
-    
-    // Verify password
-    const valid = await verifyPassword(password, user.password_hash)
-    if (!valid) {
-      return c.json({ error: 'Invalid employee code or password' }, 401)
-    }
-    
-    // Create session
-    const session = createSession({
-      id: user.id,
-      employee_code: user.employee_code,
-      employee_name: user.employee_name,
-      designation: user.designation,
-      department: user.department
-    })
-    
-    // Store session
-    await c.env.DB.prepare(`
-      INSERT INTO sessions (user_id, session_token, expires_at)
-      VALUES (?, ?, ?)
-    `).bind(user.id, session.token, session.expiresAt.toISOString()).run()
-    
-    // Update last login
-    await c.env.DB.prepare(
-      'UPDATE users SET last_login = datetime("now") WHERE id = ?'
-    ).bind(user.id).run()
-    
-    return c.json({
-      success: true,
-      user: session.user,
-      token: session.token
-    })
-    
-  } catch (error) {
-    console.error('Login error:', error)
-    return c.json({ error: 'Login failed' }, 500)
-  }
-})
-
-// Get current user
-app.get('/api/auth/me', async (c) => {
-  try {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '')
-    
-    if (!token) {
-      return c.json({ error: 'No token provided' }, 401)
-    }
-    
-    const user = await verifySession(c.env.DB, token)
-    
-    if (!user) {
-      return c.json({ error: 'Invalid or expired token' }, 401)
-    }
-    
-    return c.json({ user })
-    
-  } catch (error) {
-    console.error('Auth check error:', error)
-    return c.json({ error: 'Authentication failed' }, 500)
-  }
-})
-
-// Logout
-app.post('/api/auth/logout', async (c) => {
-  try {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '')
-    
-    if (token) {
-      await c.env.DB.prepare(
-        'DELETE FROM sessions WHERE session_token = ?'
-      ).bind(token).run()
-    }
-    
-    return c.json({ success: true })
-    
-  } catch (error) {
-    console.error('Logout error:', error)
-    return c.json({ error: 'Logout failed' }, 500)
-  }
-})
-
-// ==================== DRAFT APIs ====================
-
-// Middleware to verify auth
-async function requireAuth(c: any, next: any) {
-  const token = c.req.header('Authorization')?.replace('Bearer ', '')
-  
-  if (!token) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-  
-  const user = await verifySession(c.env.DB, token)
-  
-  if (!user) {
-    return c.json({ error: 'Invalid token' }, 401)
-  }
-  
-  c.set('user', user)
-  await next()
-}
-
-// List user's drafts
-app.get('/api/drafts', requireAuth, async (c) => {
-  try {
-    const user = c.get('user') as User
-    
-    const drafts = await c.env.DB.prepare(`
-      SELECT id, draft_name, created_at, updated_at
-      FROM drafts
-      WHERE user_id = ?
-      ORDER BY updated_at DESC
-    `).bind(user.id).all()
-    
-    return c.json({ drafts: drafts.results })
-    
-  } catch (error) {
-    console.error('List drafts error:', error)
-    return c.json({ error: 'Failed to fetch drafts' }, 500)
-  }
-})
-
-// Get specific draft
-app.get('/api/drafts/:id', requireAuth, async (c) => {
-  try {
-    const user = c.get('user') as User
-    const draftId = c.req.param('id')
-    
-    const draft = await c.env.DB.prepare(`
-      SELECT * FROM drafts WHERE id = ? AND user_id = ?
-    `).bind(draftId, user.id).first() as any
-    
-    if (!draft) {
-      return c.json({ error: 'Draft not found' }, 404)
-    }
-    
-    return c.json({
-      draft: {
-        ...draft,
-        form_data: JSON.parse(draft.form_data || '{}'),
-        receipts_data: JSON.parse(draft.receipts_data || '[]')
-      }
-    })
-    
-  } catch (error) {
-    console.error('Get draft error:', error)
-    return c.json({ error: 'Failed to fetch draft' }, 500)
-  }
-})
-
-// Create/Update draft
-app.post('/api/drafts', requireAuth, async (c) => {
-  try {
-    const user = c.get('user') as User
-    const { draft_name, form_data, receipts_data } = await c.req.json()
-    
-    // Check if draft exists
-    const existing = await c.env.DB.prepare(`
-      SELECT id FROM drafts WHERE user_id = ? AND draft_name = ?
-    `).bind(user.id, draft_name || 'auto_save').first()
-    
-    if (existing) {
-      // Update existing draft
-      await c.env.DB.prepare(`
-        UPDATE drafts 
-        SET form_data = ?, receipts_data = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `).bind(
-        JSON.stringify(form_data),
-        JSON.stringify(receipts_data || []),
-        existing.id
-      ).run()
-      
-      return c.json({ success: true, draft_id: existing.id })
-    } else {
-      // Create new draft
-      const result = await c.env.DB.prepare(`
-        INSERT INTO drafts (user_id, draft_name, form_data, receipts_data)
-        VALUES (?, ?, ?, ?)
-      `).bind(
-        user.id,
-        draft_name || 'auto_save',
-        JSON.stringify(form_data),
-        JSON.stringify(receipts_data || [])
-      ).run()
-      
-      return c.json({ success: true, draft_id: result.meta.last_row_id })
-    }
-    
-  } catch (error) {
-    console.error('Save draft error:', error)
-    return c.json({ error: 'Failed to save draft' }, 500)
-  }
-})
-
-// Delete draft
-app.delete('/api/drafts/:id', requireAuth, async (c) => {
-  try {
-    const user = c.get('user') as User
-    const draftId = c.req.param('id')
-    
-    await c.env.DB.prepare(`
-      DELETE FROM drafts WHERE id = ? AND user_id = ?
-    `).bind(draftId, user.id).run()
-    
-    return c.json({ success: true })
-    
-  } catch (error) {
-    console.error('Delete draft error:', error)
-    return c.json({ error: 'Failed to delete draft' }, 500)
-  }
-})
-
-// ==================== OCR Pattern Learning ====================
-
-// Store OCR correction for learning
-app.post('/api/ocr/learn', requireAuth, async (c) => {
-  try {
-    const user = c.get('user') as User
-    const { merchant_name, category, amount, location } = await c.req.json()
-    
-    // Check if pattern exists
-    const existing = await c.env.DB.prepare(`
-      SELECT id, times_used FROM ocr_patterns 
-      WHERE user_id = ? AND merchant_name = ? AND category = ?
-    `).bind(user.id, merchant_name, category).first() as any
-    
-    if (existing) {
-      // Update existing pattern
-      await c.env.DB.prepare(`
-        UPDATE ocr_patterns
-        SET times_used = ?, typical_amount = ?, last_used = datetime('now')
-        WHERE id = ?
-      `).bind(existing.times_used + 1, amount, existing.id).run()
-    } else {
-      // Create new pattern
-      await c.env.DB.prepare(`
-        INSERT INTO ocr_patterns 
-        (user_id, merchant_name, category, typical_amount, location, confidence_score)
-        VALUES (?, ?, ?, ?, ?, 1.0)
-      `).bind(user.id, merchant_name, category, amount, location || '').run()
-    }
-    
-    return c.json({ success: true })
-    
-  } catch (error) {
-    console.error('OCR learn error:', error)
-    return c.json({ error: 'Failed to store pattern' }, 500)
-  }
-})
-
-// Get user's learned patterns
-app.get('/api/ocr/patterns', requireAuth, async (c) => {
-  try {
-    const user = c.get('user') as User
-    const merchant = c.req.query('merchant')
-    
-    let query = `
-      SELECT * FROM ocr_patterns 
-      WHERE user_id = ?
-    `
-    const params = [user.id]
-    
-    if (merchant) {
-      query += ' AND merchant_name LIKE ?'
-      params.push(`%${merchant}%`)
-    }
-    
-    query += ' ORDER BY times_used DESC, last_used DESC LIMIT 10'
-    
-    const patterns = await c.env.DB.prepare(query).bind(...params).all()
-    
-    return c.json({ patterns: patterns.results })
-    
-  } catch (error) {
-    console.error('Get patterns error:', error)
-    return c.json({ error: 'Failed to fetch patterns' }, 500)
-  }
-})
-
-// ==================== EXCEL GENERATION (Existing) ====================
-
+// API endpoint to generate Excel file
 app.post('/api/generate-excel', async (c) => {
   try {
     const data = await c.req.json()
@@ -903,7 +531,7 @@ app.post('/api/generate-excel', async (c) => {
   }
 })
 
-// Main form page (will be updated with login)
+// Main form page
 app.get('/', (c) => {
   return c.html(`
     <!DOCTYPE html>
@@ -911,14 +539,232 @@ app.get('/', (c) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>HPX Travel Reimbursement - Login</title>
+        <title>HPX Travel Reimbursement</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     </head>
     <body class="bg-gray-50">
-        <div id="app"></div>
-        <script src="/static/app-new.js"></script>
+        <div class="min-h-screen py-8 px-4">
+            <div class="max-w-6xl mx-auto">
+                <!-- Header -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6 text-center">
+                    <h1 class="text-2xl font-bold text-gray-800 mb-2">HINDUSTAN POWER EXCHANGE LIMITED</h1>
+                    <p class="text-sm text-gray-600">Unit No 810-816, 8th Floor, World Trade Tower Sector 16 Noida</p>
+                    <p class="text-xs text-gray-500">(CIN NO -U74999MH2018PLC308448)</p>
+                    <h2 class="text-xl font-bold text-blue-600 mt-4">TRAVEL REIMBURSEMENT CLAIM FORM</h2>
+                    <p class="text-xs text-gray-500 mt-2" id="autoSaveIndicator"></p>
+                </div>
+
+                <!-- Quick Actions Bar -->
+                <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+                    <div class="flex flex-wrap gap-3 justify-center">
+                        <button onclick="saveDraft()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition">
+                            <i class="fas fa-save mr-2"></i>Save Draft
+                        </button>
+                        <button onclick="loadDraft()" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition">
+                            <i class="fas fa-folder-open mr-2"></i>Load Draft
+                        </button>
+                        <button onclick="clearDraft()" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition">
+                            <i class="fas fa-trash mr-2"></i>Clear Draft
+                        </button>
+                        <button onclick="saveAsTemplate()" class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition">
+                            <i class="fas fa-bookmark mr-2"></i>Save as Template
+                        </button>
+                        <button onclick="document.getElementById('templatesModal').classList.remove('hidden')" 
+                            class="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition">
+                            <i class="fas fa-list mr-2"></i>My Templates
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Receipt Upload Section -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-orange-500 pb-2">
+                        <i class="fas fa-camera mr-2"></i>Upload Receipts (OCR Enabled)
+                    </h3>
+                    <div class="mb-4">
+                        <label class="flex items-center justify-center w-full px-4 py-6 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-100 transition">
+                            <div class="text-center">
+                                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
+                                <p class="text-sm text-gray-600"><strong>Click to upload</strong> or drag and drop</p>
+                                <p class="text-xs text-gray-500 mt-1">PNG, JPG (max 5MB) - OCR will auto-extract amount</p>
+                            </div>
+                            <input type="file" accept="image/*" multiple onchange="handleReceiptUpload(event)" class="hidden">
+                        </label>
+                    </div>
+                    <div id="receiptsContainer" class="mt-4">
+                        <p class="text-gray-500 text-sm">No receipts uploaded yet</p>
+                    </div>
+                </div>
+
+                <!-- Templates Modal -->
+                <div id="templatesModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-gray-800">
+                                <i class="fas fa-bookmark mr-2"></i>My Templates
+                            </h3>
+                            <button onclick="document.getElementById('templatesModal').classList.add('hidden')" 
+                                class="text-gray-500 hover:text-gray-700">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <div id="templatesList">
+                            <p class="text-gray-500 text-sm">No templates saved yet</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Form -->
+                <form id="reimbursementForm" class="bg-white rounded-lg shadow-md p-6">
+                    <!-- Employee Information -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-blue-500 pb-2">
+                            <i class="fas fa-user mr-2"></i>Employee Information
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Name of Employee/Traveller *</label>
+                                <input type="text" id="employeeName" required 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter full name">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Employee Code *</label>
+                                <input type="text" id="employeeCode" required 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter employee code">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Designation *</label>
+                                <input type="text" id="designation" required 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter designation">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Department & Budget Code *</label>
+                                <input type="text" id="department" required 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter department">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Period of Claim *</label>
+                                <input type="text" id="periodOfClaim" required 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="e.g., Nov-24">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Purpose of Travel *</label>
+                                <input type="text" id="purposeOfTravel" required 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="e.g., Dehradun - Official">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Journey Details -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-green-500 pb-2">
+                            <i class="fas fa-plane mr-2"></i>Detail of Journey
+                        </h3>
+                        <div id="journeyContainer"></div>
+                        <button type="button" onclick="addJourney()" 
+                            class="mt-4 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition">
+                            <i class="fas fa-plus mr-2"></i>Add Journey
+                        </button>
+                        <div class="mt-4 text-right">
+                            <span class="text-lg font-bold">Journey Total: ₹ <span id="journeyTotal">0.00</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Hotel Charges -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-purple-500 pb-2">
+                            <i class="fas fa-hotel mr-2"></i>Hotel Charges
+                        </h3>
+                        <div id="hotelContainer"></div>
+                        <button type="button" onclick="addHotel()" 
+                            class="mt-4 px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition">
+                            <i class="fas fa-plus mr-2"></i>Add Hotel
+                        </button>
+                        <div class="mt-4 text-right">
+                            <span class="text-lg font-bold">Hotel Total: ₹ <span id="hotelTotal">0.00</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Local Conveyance -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-yellow-500 pb-2">
+                            <i class="fas fa-taxi mr-2"></i>Detail of Local Conveyance
+                        </h3>
+                        <div id="conveyanceContainer"></div>
+                        <button type="button" onclick="addConveyance()" 
+                            class="mt-4 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition">
+                            <i class="fas fa-plus mr-2"></i>Add Conveyance
+                        </button>
+                        <div class="mt-4 text-right">
+                            <span class="text-lg font-bold">Conveyance Total: ₹ <span id="conveyanceTotal">0.00</span></span>
+                        </div>
+                    </div>
+
+                    <!-- DA Claimed -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-indigo-500 pb-2">
+                            <i class="fas fa-money-bill-wave mr-2"></i>Detail of DA Claimed
+                        </h3>
+                        <div id="daContainer"></div>
+                        <button type="button" onclick="addDA()" 
+                            class="mt-4 px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition">
+                            <i class="fas fa-plus mr-2"></i>Add DA
+                        </button>
+                        <div class="mt-4 text-right">
+                            <span class="text-lg font-bold">DA Total: ₹ <span id="daTotal">0.00</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Other Expenses -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b-2 border-red-500 pb-2">
+                            <i class="fas fa-receipt mr-2"></i>Other Incidental Expense
+                        </h3>
+                        <div id="otherContainer"></div>
+                        <button type="button" onclick="addOther()" 
+                            class="mt-4 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition">
+                            <i class="fas fa-plus mr-2"></i>Add Expense
+                        </button>
+                        <div class="mt-4 text-right">
+                            <span class="text-lg font-bold">Other Total: ₹ <span id="otherTotal">0.00</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Grand Total -->
+                    <div class="bg-yellow-100 p-6 rounded-lg mb-6">
+                        <div class="text-center">
+                            <span class="text-2xl font-bold text-gray-800">GRAND TOTAL: ₹ <span id="grandTotal">0.00</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="text-center">
+                        <button type="submit" 
+                            class="px-8 py-3 bg-blue-600 text-white text-lg font-bold rounded-md hover:bg-blue-700 transition shadow-lg">
+                            <i class="fas fa-file-excel mr-2"></i>Generate Excel File
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Loading Overlay -->
+                <div id="loadingOverlay" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-white p-8 rounded-lg text-center">
+                        <i class="fas fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
+                        <p class="text-lg font-medium">Generating Excel file...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="/static/app.js"></script>
     </body>
     </html>
   `)
