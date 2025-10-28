@@ -16,9 +16,9 @@
   - Mobile-responsive design using TailwindCSS
 
 ## URLs
-- **Development**: https://3000-imj5aatue1j2tnx8l6w1r-b9b802c4.sandbox.novita.ai
-- **Production**: (Pending Cloudflare deployment)
+- **Production**: https://hpx-travel-reimb.pages.dev ✅ LIVE
 - **GitHub**: https://github.com/Khushi6211/Claim-HPX
+- **Database**: Cloudflare D1 (Production)
 
 ## 🚀 NEW FEATURES (Just Added!)
 
@@ -45,17 +45,18 @@
 
 ## Data Architecture
 - **Data Models**: 
-  - Employee Information (Name, Code, Designation, Department, Period, Purpose)
-  - Journey Details (Departure/Arrival locations, dates, times, company arrangement, amounts)
-  - Hotel Charges (Hotel name, place, period of stay, company arrangement, amounts)
-  - Local Conveyance (Date, from/to locations, mode of travel, amounts)
-  - DA Claims (Date, city name, allowance amounts)
-  - Other Expenses (Date, particulars, amounts)
-  - **NEW**: Drafts (Saved in browser localStorage)
-  - **NEW**: Templates (Reusable trip patterns)
-  - **NEW**: Receipts (Base64 encoded images in localStorage)
-- **Storage Services**: Browser localStorage (no server storage, fully private)
-- **OCR Engine**: Tesseract.js (runs in browser, no data sent to servers)
+  - **Users** (Employee authentication with bcrypt password hashing)
+  - **Sessions** (7-day bearer token authentication)
+  - **Drafts** (Cloud-synced across devices via D1 database)
+  - **Templates** (Saved in browser localStorage per user)
+  - **Claims** (Historical claim records - coming in Option B)
+  - **Receipts** (Base64 encoded images stored with drafts)
+  - **OCR Patterns** (AI learning patterns for bill categories)
+  - **Receipt Analysis** (OCR accuracy tracking and improvement)
+- **Storage Services**: 
+  - **Cloudflare D1** (SQLite-based relational database for user data and drafts)
+  - **localStorage** (Templates and temporary data)
+- **OCR Engine**: Tesseract.js v5 (runs in browser, no data sent to external servers)
 - **Data Flow**: 
   1. User fills form in browser
   2. Auto-save stores data every 30 seconds
@@ -179,10 +180,15 @@
 - **Dev Server**: PM2 with Wrangler Pages Dev
 
 ## Deployment Status
-- **Platform**: Cloudflare Pages
-- **Status**: ✅ Active (Development with new features)
-- **Tech Stack**: Hono + TypeScript + TailwindCSS + ExcelJS + Tesseract.js
-- **Last Updated**: 2025-10-24
+- **Platform**: Cloudflare Pages (Global Edge Network)
+- **Status**: ✅ LIVE IN PRODUCTION
+- **Production URL**: https://hpx-travel-reimb.pages.dev
+- **Database**: Cloudflare D1 (Region: Eastern North America)
+- **Database ID**: 5c5942d5-8830-4ba2-8c64-40dcb088ebd6
+- **Features**: Multi-user authentication, Cloud sync, Enhanced OCR
+- **Tech Stack**: Hono + TypeScript + TailwindCSS + ExcelJS + Tesseract.js + bcryptjs
+- **Last Deployed**: 2025-10-28 12:20 UTC
+- **Deployment**: Automated via Wrangler CLI
 
 ## Development Notes
 
@@ -204,13 +210,31 @@ pm2 logs hpx-travel-reimb --nostream
 pm2 stop hpx-travel-reimb
 ```
 
-### Deployment to Cloudflare Pages:
+#### Deployment to Cloudflare Pages:
 ```bash
-# Setup Cloudflare API key first
+# Setup Cloudflare API key first (one-time)
 setup_cloudflare_api_key
 
-# Build and deploy
-npm run deploy:prod
+# Build the project
+npm run build
+
+# Deploy to production
+npx wrangler pages deploy dist --project-name hpx-travel-reimb
+
+# Apply database migrations (if schema changes)
+npx wrangler d1 migrations apply hpx-travel-reimb-db --remote
+```
+
+### Production Database Management:
+```bash
+# List all D1 databases
+npx wrangler d1 list
+
+# Execute SQL on production database
+npx wrangler d1 execute hpx-travel-reimb-db --remote --command="SELECT COUNT(*) FROM users;"
+
+# View production database info
+npx wrangler d1 info hpx-travel-reimb-db
 ```
 
 ## File Structure
