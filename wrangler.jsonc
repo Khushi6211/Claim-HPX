@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "hpx-travel-reimb-db",
-      "database_id": "local-db-for-development"
+      "database_id": "5c5942d5-8830-4ba2-8c64-40dcb088ebd6"
     }
   ]
 }
