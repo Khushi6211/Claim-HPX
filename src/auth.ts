@@ -33,6 +33,14 @@ export function generateToken(): string {
     .join('');
 }
 
+export async function hashToken(token: string): Promise<string> {
+  const data = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 // Create session (7 days validity)
 export function createSession(user: User): Session {
   const token = generateToken();
@@ -48,12 +56,13 @@ export function createSession(user: User): Session {
 
 // Verify session token from database
 export async function verifySession(db: D1Database, token: string): Promise<User | null> {
+  const tokenHash = await hashToken(token);
   const result = await db.prepare(`
     SELECT u.id, u.employee_code, u.employee_name, u.designation, u.department
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.session_token = ? AND s.expires_at > datetime('now')
-  `).bind(token).first();
+  `).bind(tokenHash).first();
   
   if (!result) return null;
   
