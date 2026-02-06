@@ -1,6 +1,15 @@
 // Authentication utilities
 import bcrypt from 'bcryptjs';
 
+// Hash token with SHA-256 for secure storage
+export async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(token);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export interface User {
   id: number;
   employee_code: string;
@@ -46,14 +55,17 @@ export function createSession(user: User): Session {
   };
 }
 
-// Verify session token from database
+// Verify session token from database (with hashed token lookup)
 export async function verifySession(db: D1Database, token: string): Promise<User | null> {
+  // Hash the provided token to compare with stored hash
+  const hashedToken = await hashToken(token);
+  
   const result = await db.prepare(`
     SELECT u.id, u.employee_code, u.employee_name, u.designation, u.department
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.session_token = ? AND s.expires_at > datetime('now')
-  `).bind(token).first();
+  `).bind(hashedToken).first();
   
   if (!result) return null;
   
