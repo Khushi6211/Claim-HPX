@@ -388,9 +388,9 @@ app.get('/api/claims/summary', requireAuth, async (c) => {
       WHERE user_id = ?
     `).bind(user.id).first() as any
     
-    // Recent claims (last 5)
+    // Recent claims (last 5) - using actual table columns
     const recentResult = await c.env.DB.prepare(`
-      SELECT id, total_amount, net_claim, status, submitted_at
+      SELECT id, claim_period, total_amount, submitted_at
       FROM claims
       WHERE user_id = ?
       ORDER BY submitted_at DESC
@@ -398,11 +398,12 @@ app.get('/api/claims/summary', requireAuth, async (c) => {
     `).bind(user.id).all()
     
     return c.json({
-      totalClaims: totalResult.count || 0,
-      totalAmount: totalResult.total || 0,
+      totalClaims: totalResult?.count || 0,
+      totalAmount: totalResult?.total || 0,
       recentClaims: recentResult.results || []
     })
   } catch (error) {
+    console.error('Claims summary error:', error)
     return c.json({ error: 'Failed to fetch summary' }, 500)
   }
 })

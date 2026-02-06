@@ -297,8 +297,7 @@ async function showDashboard() {
                   <tr>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Amount</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Net Claim</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitted</th>
                   </tr>
                 </thead>
@@ -306,11 +305,8 @@ async function showDashboard() {
                   ${summary.recentClaims.map(claim => `
                     <tr>
                       <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">#${claim.id}</td>
-                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">₹${claim.total_amount.toLocaleString('en-IN')}</td>
-                      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">₹${claim.net_claim.toLocaleString('en-IN')}</td>
-                      <td class="px-6 py-4 whitespace-nowrap">
-                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">${claim.status}</span>
-                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">₹${claim.total_amount.toLocaleString('en-IN')}</td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${claim.claim_period || 'N/A'}</td>
                       <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${new Date(claim.submitted_at).toLocaleDateString('en-IN')}</td>
                     </tr>
                   `).join('')}
