@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
 import ExcelJS from 'exceljs'
-import { hashPassword, verifyPassword, createSession, verifySession, User } from './auth'
+import { hashPassword, verifyPassword, createSession, hashToken, verifySession, User } from './auth'
 
 type Bindings = {
   DB: D1Database;
@@ -10,8 +10,20 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173'
+]
+
 // Enable CORS for API routes
-app.use('/api/*', cors())
+app.use('/api/*', cors({
+  origin: (origin) => {
+    if (!origin) return false
+    return allowedOrigins.includes(origin) ? origin : null
+  },
+  allowMethods: ['GET', 'POST', 'DELETE'],
+  allowHeaders: ['Authorization', 'Content-Type']
+}))
 
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
@@ -28,8 +40,8 @@ app.post('/api/auth/register', async (c) => {
       return c.json({ error: 'Missing required fields' }, 400)
     }
     
-    if (password.length < 6) {
-      return c.json({ error: 'Password must be at least 6 characters' }, 400)
+    if (password.length < 10) {
+      return c.json({ error: 'Password must be at least 10 characters' }, 400)
     }
     
     // Check if user already exists
@@ -69,10 +81,11 @@ app.post('/api/auth/register', async (c) => {
     })
     
     // Store session
+    const sessionTokenHash = await hashToken(session.token)
     await c.env.DB.prepare(`
       INSERT INTO sessions (user_id, session_token, expires_at)
       VALUES (?, ?, ?)
-    `).bind(user.id, session.token, session.expiresAt.toISOString()).run()
+    `).bind(user.id, sessionTokenHash, session.expiresAt.toISOString()).run()
     
     return c.json({
       success: true,
@@ -120,10 +133,11 @@ app.post('/api/auth/login', async (c) => {
     })
     
     // Store session
+    const sessionTokenHash = await hashToken(session.token)
     await c.env.DB.prepare(`
       INSERT INTO sessions (user_id, session_token, expires_at)
       VALUES (?, ?, ?)
-    `).bind(user.id, session.token, session.expiresAt.toISOString()).run()
+    `).bind(user.id, sessionTokenHash, session.expiresAt.toISOString()).run()
     
     // Update last login
     await c.env.DB.prepare(
@@ -171,9 +185,10 @@ app.post('/api/auth/logout', async (c) => {
     const token = c.req.header('Authorization')?.replace('Bearer ', '')
     
     if (token) {
+      const tokenHash = await hashToken(token)
       await c.env.DB.prepare(
         'DELETE FROM sessions WHERE session_token = ?'
-      ).bind(token).run()
+      ).bind(tokenHash).run()
     }
     
     return c.json({ success: true })
@@ -315,6 +330,131 @@ app.delete('/api/drafts/:id', requireAuth, async (c) => {
   }
 })
 
+// ==================== CLAIMS APIs ====================
+
+const toNumber = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
+// Submit claim
+app.post('/api/claims', requireAuth, async (c) => {
+  try {
+    const user = c.get('user') as User
+    const {
+      claim_period,
+      purpose_of_travel,
+      journeys = [],
+      hotels = [],
+      conveyance = [],
+      daClaimed = [],
+      otherExpenses = [],
+      form_data = {}
+    } = await c.req.json()
+
+    if (!claim_period) {
+      return c.json({ error: 'Claim period is required' }, 400)
+    }
+
+    const journeyTotal = journeys.reduce((sum: number, item: any) => sum + toNumber(item?.amount), 0)
+    const hotelTotal = hotels.reduce((sum: number, item: any) => sum + toNumber(item?.amount), 0)
+    const conveyanceTotal = conveyance.reduce((sum: number, item: any) => sum + toNumber(item?.amount), 0)
+    const daTotal = daClaimed.reduce((sum: number, item: any) => sum + toNumber(item?.amount), 0)
+    const otherTotal = otherExpenses.reduce((sum: number, item: any) => sum + toNumber(item?.amount), 0)
+    const totalAmount = journeyTotal + hotelTotal + conveyanceTotal + daTotal + otherTotal
+
+    const result = await c.env.DB.prepare(`
+      INSERT INTO claims (
+        user_id,
+        claim_period,
+        purpose_of_travel,
+        total_amount,
+        journey_amount,
+        hotel_amount,
+        conveyance_amount,
+        da_amount,
+        other_amount,
+        form_data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      user.id,
+      claim_period,
+      purpose_of_travel || '',
+      totalAmount,
+      journeyTotal,
+      hotelTotal,
+      conveyanceTotal,
+      daTotal,
+      otherTotal,
+      JSON.stringify(form_data)
+    ).run()
+
+    if (!result.success) {
+      return c.json({ error: 'Failed to submit claim' }, 500)
+    }
+
+    return c.json({ success: true, claim_id: result.meta.last_row_id })
+  } catch (error) {
+    console.error('Submit claim error:', error)
+    return c.json({ error: 'Failed to submit claim' }, 500)
+  }
+})
+
+// List claims
+app.get('/api/claims', requireAuth, async (c) => {
+  try {
+    const user = c.get('user') as User
+    const limit = Math.min(Math.max(toNumber(c.req.query('limit')) || 20, 1), 100)
+    const claims = await c.env.DB.prepare(`
+      SELECT id, claim_period, purpose_of_travel, total_amount, submitted_at
+      FROM claims
+      WHERE user_id = ?
+      ORDER BY submitted_at DESC
+      LIMIT ?
+    `).bind(user.id, limit).all()
+
+    return c.json({ claims: claims.results })
+  } catch (error) {
+    console.error('List claims error:', error)
+    return c.json({ error: 'Failed to fetch claims' }, 500)
+  }
+})
+
+// Claims summary
+app.get('/api/claims/summary', requireAuth, async (c) => {
+  try {
+    const user = c.get('user') as User
+    const totals = await c.env.DB.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
+      FROM claims
+      WHERE user_id = ?
+    `).bind(user.id).first() as any
+
+    const recentClaims = await c.env.DB.prepare(`
+      SELECT id, claim_period, total_amount, submitted_at
+      FROM claims
+      WHERE user_id = ?
+      ORDER BY submitted_at DESC
+      LIMIT 5
+    `).bind(user.id).all()
+
+    return c.json({
+      summary: {
+        total_claims: totals?.count ?? 0,
+        total_amount: totals?.total ?? 0,
+        recent: recentClaims.results
+      }
+    })
+  } catch (error) {
+    console.error('Claims summary error:', error)
+    return c.json({ error: 'Failed to fetch summary' }, 500)
+  }
+})
+
 // ==================== OCR Pattern Learning ====================
 
 // Store OCR correction for learning
@@ -387,6 +527,24 @@ app.get('/api/ocr/patterns', requireAuth, async (c) => {
 app.post('/api/generate-excel', async (c) => {
   try {
     const data = await c.req.json()
+
+    const sanitizeExcelValue = (value: unknown): string | number => {
+      if (value === null || value === undefined) return ''
+      if (typeof value === 'number') return value
+      const text = String(value)
+      if (text.startsWith('=') || text.startsWith('+') || text.startsWith('-') || text.startsWith('@')) {
+        return `'${text}`
+      }
+      return text
+    }
+
+    const sanitizeFilenamePart = (value: unknown): string => {
+      const text = String(value ?? '')
+      return text
+        .replace(/[\r\n]/g, '')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(0, 60)
+    }
     
     // Create a new workbook and worksheet
     const workbook = new ExcelJS.Workbook()
@@ -446,7 +604,7 @@ app.post('/api/generate-excel', async (c) => {
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     worksheet.getCell(`A${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
     worksheet.mergeCells(`D${currentRow}:I${currentRow}`)
-    worksheet.getCell(`D${currentRow}`).value = data.employeeName || ''
+    worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(data.employeeName)
     currentRow++
     
     worksheet.mergeCells(`A${currentRow}:C${currentRow}`)
@@ -454,7 +612,7 @@ app.post('/api/generate-excel', async (c) => {
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     worksheet.getCell(`A${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
     worksheet.mergeCells(`D${currentRow}:I${currentRow}`)
-    worksheet.getCell(`D${currentRow}`).value = data.employeeCode || ''
+    worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(data.employeeCode)
     currentRow++
     
     worksheet.mergeCells(`A${currentRow}:C${currentRow}`)
@@ -462,7 +620,7 @@ app.post('/api/generate-excel', async (c) => {
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     worksheet.getCell(`A${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
     worksheet.mergeCells(`D${currentRow}:I${currentRow}`)
-    worksheet.getCell(`D${currentRow}`).value = data.designation || ''
+    worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(data.designation)
     currentRow++
     
     worksheet.mergeCells(`A${currentRow}:C${currentRow}`)
@@ -470,7 +628,7 @@ app.post('/api/generate-excel', async (c) => {
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     worksheet.getCell(`A${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
     worksheet.mergeCells(`D${currentRow}:I${currentRow}`)
-    worksheet.getCell(`D${currentRow}`).value = data.department || ''
+    worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(data.department)
     currentRow++
     
     worksheet.mergeCells(`A${currentRow}:C${currentRow}`)
@@ -478,7 +636,7 @@ app.post('/api/generate-excel', async (c) => {
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     worksheet.getCell(`A${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
     worksheet.mergeCells(`D${currentRow}:I${currentRow}`)
-    worksheet.getCell(`D${currentRow}`).value = data.periodOfClaim || ''
+    worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(data.periodOfClaim)
     currentRow++
     
     worksheet.mergeCells(`A${currentRow}:C${currentRow}`)
@@ -486,7 +644,7 @@ app.post('/api/generate-excel', async (c) => {
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     worksheet.getCell(`A${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
     worksheet.mergeCells(`D${currentRow}:I${currentRow}`)
-    worksheet.getCell(`D${currentRow}`).value = data.purposeOfTravel || ''
+    worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(data.purposeOfTravel)
     currentRow += 2
     
     // Detail of Journey Section
@@ -526,13 +684,13 @@ app.post('/api/generate-excel', async (c) => {
     if (data.journeys && data.journeys.length > 0) {
       data.journeys.forEach((journey: any, index: number) => {
         worksheet.getCell(`A${currentRow}`).value = index + 1
-        worksheet.getCell(`B${currentRow}`).value = journey.departureFrom || ''
-        worksheet.getCell(`C${currentRow}`).value = journey.departureDate || ''
-        worksheet.getCell(`D${currentRow}`).value = journey.departureTime || ''
-        worksheet.getCell(`E${currentRow}`).value = journey.arrivedAt || ''
-        worksheet.getCell(`F${currentRow}`).value = journey.arrivalDate || ''
-        worksheet.getCell(`G${currentRow}`).value = journey.arrivalTime || ''
-        worksheet.getCell(`H${currentRow}`).value = journey.arrangedByCompany || ''
+        worksheet.getCell(`B${currentRow}`).value = sanitizeExcelValue(journey.departureFrom)
+        worksheet.getCell(`C${currentRow}`).value = sanitizeExcelValue(journey.departureDate)
+        worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(journey.departureTime)
+        worksheet.getCell(`E${currentRow}`).value = sanitizeExcelValue(journey.arrivedAt)
+        worksheet.getCell(`F${currentRow}`).value = sanitizeExcelValue(journey.arrivalDate)
+        worksheet.getCell(`G${currentRow}`).value = sanitizeExcelValue(journey.arrivalTime)
+        worksheet.getCell(`H${currentRow}`).value = sanitizeExcelValue(journey.arrangedByCompany)
         const amount = parseFloat(journey.amount) || 0
         worksheet.getCell(`I${currentRow}`).value = amount
         journeyTotal += amount
@@ -595,11 +753,11 @@ app.post('/api/generate-excel', async (c) => {
       data.hotels.forEach((hotel: any, index: number) => {
         worksheet.getCell(`A${currentRow}`).value = index + 1
         worksheet.mergeCells(`B${currentRow}:D${currentRow}`)
-        worksheet.getCell(`B${currentRow}`).value = hotel.hotelName || ''
+        worksheet.getCell(`B${currentRow}`).value = sanitizeExcelValue(hotel.hotelName)
         worksheet.mergeCells(`E${currentRow}:F${currentRow}`)
-        worksheet.getCell(`E${currentRow}`).value = hotel.place || ''
-        worksheet.getCell(`G${currentRow}`).value = hotel.arrangedByCompany || ''
-        worksheet.getCell(`H${currentRow}`).value = hotel.periodOfStay || ''
+        worksheet.getCell(`E${currentRow}`).value = sanitizeExcelValue(hotel.place)
+        worksheet.getCell(`G${currentRow}`).value = sanitizeExcelValue(hotel.arrangedByCompany)
+        worksheet.getCell(`H${currentRow}`).value = sanitizeExcelValue(hotel.periodOfStay)
         const amount = parseFloat(hotel.amount) || 0
         worksheet.getCell(`I${currentRow}`).value = amount
         hotelTotal += amount
@@ -663,12 +821,12 @@ app.post('/api/generate-excel', async (c) => {
       data.conveyance.forEach((conv: any, index: number) => {
         worksheet.getCell(`A${currentRow}`).value = index + 1
         worksheet.mergeCells(`B${currentRow}:C${currentRow}`)
-        worksheet.getCell(`B${currentRow}`).value = conv.date || ''
+        worksheet.getCell(`B${currentRow}`).value = sanitizeExcelValue(conv.date)
         worksheet.mergeCells(`D${currentRow}:E${currentRow}`)
-        worksheet.getCell(`D${currentRow}`).value = conv.from || ''
+        worksheet.getCell(`D${currentRow}`).value = sanitizeExcelValue(conv.from)
         worksheet.mergeCells(`F${currentRow}:G${currentRow}`)
-        worksheet.getCell(`F${currentRow}`).value = conv.to || ''
-        worksheet.getCell(`H${currentRow}`).value = conv.mode || ''
+        worksheet.getCell(`F${currentRow}`).value = sanitizeExcelValue(conv.to)
+        worksheet.getCell(`H${currentRow}`).value = sanitizeExcelValue(conv.mode)
         const amount = parseFloat(conv.amount) || 0
         worksheet.getCell(`I${currentRow}`).value = amount
         conveyanceTotal += amount
@@ -730,9 +888,9 @@ app.post('/api/generate-excel', async (c) => {
       data.daClaimed.forEach((da: any, index: number) => {
         worksheet.getCell(`A${currentRow}`).value = index + 1
         worksheet.mergeCells(`B${currentRow}:D${currentRow}`)
-        worksheet.getCell(`B${currentRow}`).value = da.date || ''
+        worksheet.getCell(`B${currentRow}`).value = sanitizeExcelValue(da.date)
         worksheet.mergeCells(`E${currentRow}:G${currentRow}`)
-        worksheet.getCell(`E${currentRow}`).value = da.cityName || ''
+        worksheet.getCell(`E${currentRow}`).value = sanitizeExcelValue(da.cityName)
         const amount = parseFloat(da.amount) || 0
         worksheet.mergeCells(`H${currentRow}:I${currentRow}`)
         worksheet.getCell(`H${currentRow}`).value = amount
@@ -795,9 +953,9 @@ app.post('/api/generate-excel', async (c) => {
       data.otherExpenses.forEach((expense: any, index: number) => {
         worksheet.getCell(`A${currentRow}`).value = index + 1
         worksheet.mergeCells(`B${currentRow}:D${currentRow}`)
-        worksheet.getCell(`B${currentRow}`).value = expense.date || ''
+        worksheet.getCell(`B${currentRow}`).value = sanitizeExcelValue(expense.date)
         worksheet.mergeCells(`E${currentRow}:H${currentRow}`)
-        worksheet.getCell(`E${currentRow}`).value = expense.particulars || ''
+        worksheet.getCell(`E${currentRow}`).value = sanitizeExcelValue(expense.particulars)
         const amount = parseFloat(expense.amount) || 0
         worksheet.getCell(`I${currentRow}`).value = amount
         otherTotal += amount
@@ -838,7 +996,7 @@ app.post('/api/generate-excel', async (c) => {
     
     // Amount in words
     worksheet.mergeCells(`A${currentRow}:I${currentRow}`)
-    worksheet.getCell(`A${currentRow}`).value = `AMOUNT IN WORDS: ${data.amountInWords || ''}`
+    worksheet.getCell(`A${currentRow}`).value = `AMOUNT IN WORDS: ${sanitizeExcelValue(data.amountInWords)}`
     worksheet.getCell(`A${currentRow}`).font = { bold: true }
     currentRow += 2
     
@@ -890,10 +1048,14 @@ app.post('/api/generate-excel', async (c) => {
     // Generate Excel file
     const buffer = await workbook.xlsx.writeBuffer()
     
+    const safeEmployeeName = sanitizeFilenamePart(data.employeeName)
+    const safePeriod = sanitizeFilenamePart(data.periodOfClaim)
+    const filename = `Travel_Reimbursement_${safeEmployeeName}_${safePeriod}.xlsx`
+
     return new Response(buffer, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="Travel_Reimbursement_${data.employeeName}_${data.periodOfClaim}.xlsx"`
+        'Content-Disposition': `attachment; filename="${filename}"`
       }
     })
     
