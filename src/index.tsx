@@ -13,7 +13,14 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 // ===== SECURITY: Restricted CORS =====
 app.use('/api/*', cors({
-  origin: ['https://hpx-travel-reimb.pages.dev', 'https://*.hpx-travel-reimb.pages.dev'],
+  origin: (origin) => {
+    // Allow main domain and all subdomains (deployment previews)
+    if (origin === 'https://hpx-travel-reimb.pages.dev' || 
+        (origin && origin.endsWith('.hpx-travel-reimb.pages.dev'))) {
+      return origin
+    }
+    return 'https://hpx-travel-reimb.pages.dev'
+  },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true
