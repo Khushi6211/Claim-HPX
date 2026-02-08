@@ -348,14 +348,14 @@ function showNewClaimForm(claimType = 'tour') {
   APP_STATE.formData = {}
   APP_STATE.currentClaimType = claimType
   
-  // For OPD and Contingency - show coming soon
+  // Show appropriate form based on claim type
   if (claimType === 'opd') {
-    alert('OPD Medical Claim form is under development.\n\nExpected features:\n- Patient details\n- Medical expenses\n- Doctor/Hospital information\n- Bill attachments\n\nPlease use Tour Allowance for now.')
+    showOPDClaimForm()
     return
   }
   
   if (claimType === 'contingency') {
-    alert('Contingency Claim form is under development.\n\nExpected features:\n- Purpose and category\n- Expense details\n- Department approval\n- Supporting documents\n\nPlease use Tour Allowance for now.')
+    showContingencyClaimForm()
     return
   }
   
@@ -959,6 +959,520 @@ async function deleteDraft(draftId) {
   } catch (error) {
     hideLoading()
     alert('Failed to delete draft: ' + error.message)
+  }
+}
+
+// ===== OPD MEDICAL CLAIM FORM =====
+function showOPDClaimForm() {
+  document.getElementById('app').innerHTML = `
+    <div class="min-h-screen bg-gray-50">
+      <nav class="bg-green-700 text-white shadow-lg">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+          <div class="flex items-center gap-4">
+            <div class="bg-white rounded-lg p-2">
+              <svg width="40" height="40" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <rect fill="#1E3A8A" width="100" height="100" rx="10"/>
+                <text x="50" y="65" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#FFFFFF" text-anchor="middle">HPX</text>
+              </svg>
+            </div>
+            <div>
+              <h1 class="text-2xl font-bold">OPD Medical Claim</h1>
+              <p class="text-sm text-green-200">${AUTH_STATE.user.employee_name}</p>
+            </div>
+          </div>
+          <button onclick="showDashboard()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg">
+            <i class="fas fa-home mr-2"></i>Dashboard
+          </button>
+        </div>
+      </nav>
+      
+      <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <form id="opdClaimForm" class="space-y-6">
+          <!-- Employee Details -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Employee Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Employee Name</label>
+                <input type="text" id="opd_employee_name" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.employee_name}" readonly>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Employee Code</label>
+                <input type="text" id="opd_employee_code" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.employee_code}" readonly>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Designation</label>
+                <input type="text" id="opd_designation" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.designation}" readonly>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                <input type="text" id="opd_department" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.department}" readonly>
+              </div>
+            </div>
+          </div>
+
+          <!-- Patient Details -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Patient Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Patient Name *</label>
+                <input type="text" id="opd_patient_name" class="w-full px-4 py-2 border rounded-lg" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Relation with Employee *</label>
+                <select id="opd_relation" class="w-full px-4 py-2 border rounded-lg" required>
+                  <option value="">Select Relation</option>
+                  <option value="Self">Self</option>
+                  <option value="Spouse">Spouse</option>
+                  <option value="Child">Child</option>
+                  <option value="Parent">Parent</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Age</label>
+                <input type="number" id="opd_age" class="w-full px-4 py-2 border rounded-lg">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Date of Consultation *</label>
+                <input type="date" id="opd_consultation_date" class="w-full px-4 py-2 border rounded-lg" required>
+              </div>
+            </div>
+          </div>
+
+          <!-- Medical Details -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Medical Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Doctor Name *</label>
+                <input type="text" id="opd_doctor_name" class="w-full px-4 py-2 border rounded-lg" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Hospital/Clinic Name *</label>
+                <input type="text" id="opd_hospital_name" class="w-full px-4 py-2 border rounded-lg" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Ailment/Disease *</label>
+                <input type="text" id="opd_ailment" class="w-full px-4 py-2 border rounded-lg" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Treatment Type</label>
+                <select id="opd_treatment_type" class="w-full px-4 py-2 border rounded-lg">
+                  <option value="">Select Type</option>
+                  <option value="Consultation">Consultation</option>
+                  <option value="Diagnostic Tests">Diagnostic Tests</option>
+                  <option value="Medicine">Medicine</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expense Details -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Expense Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Consultation Fee (₹)</label>
+                <input type="number" id="opd_consultation_fee" class="w-full px-4 py-2 border rounded-lg" value="0">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Medicine Cost (₹)</label>
+                <input type="number" id="opd_medicine_cost" class="w-full px-4 py-2 border rounded-lg" value="0">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Diagnostic Tests (₹)</label>
+                <input type="number" id="opd_test_cost" class="w-full px-4 py-2 border rounded-lg" value="0">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Other Expenses (₹)</label>
+                <input type="number" id="opd_other_cost" class="w-full px-4 py-2 border rounded-lg" value="0">
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Bill Number(s)</label>
+                <input type="text" id="opd_bill_numbers" class="w-full px-4 py-2 border rounded-lg" placeholder="Enter bill numbers separated by commas">
+              </div>
+            </div>
+            <div class="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p class="text-lg font-bold text-blue-900">Total Claim Amount: ₹<span id="opd_total_amount">0</span></p>
+            </div>
+          </div>
+
+          <!-- Additional Information -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Additional Information</h2>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Remarks/Description</label>
+              <textarea id="opd_remarks" rows="3" class="w-full px-4 py-2 border rounded-lg" placeholder="Any additional information..."></textarea>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex gap-4">
+              <button type="button" onclick="generateOPDExcel()" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg">
+                <i class="fas fa-file-excel mr-2"></i>Generate Excel
+              </button>
+              <button type="button" onclick="submitOPDClaim()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">
+                <i class="fas fa-paper-plane mr-2"></i>Submit Claim
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  `
+  
+  // Auto-calculate total
+  const costInputs = ['opd_consultation_fee', 'opd_medicine_cost', 'opd_test_cost', 'opd_other_cost']
+  costInputs.forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+      let total = 0
+      costInputs.forEach(inputId => {
+        total += parseFloat(document.getElementById(inputId).value || 0)
+      })
+      document.getElementById('opd_total_amount').textContent = total.toLocaleString('en-IN')
+    })
+  })
+}
+
+async function generateOPDExcel() {
+  try {
+    showLoading('Generating Excel...')
+    
+    const data = {
+      employeeName: document.getElementById('opd_employee_name').value,
+      employeeCode: document.getElementById('opd_employee_code').value,
+      designation: document.getElementById('opd_designation').value,
+      department: document.getElementById('opd_department').value,
+      patientName: document.getElementById('opd_patient_name').value,
+      relation: document.getElementById('opd_relation').value,
+      age: document.getElementById('opd_age').value,
+      consultationDate: document.getElementById('opd_consultation_date').value,
+      doctorName: document.getElementById('opd_doctor_name').value,
+      hospitalName: document.getElementById('opd_hospital_name').value,
+      ailment: document.getElementById('opd_ailment').value,
+      treatmentType: document.getElementById('opd_treatment_type').value,
+      consultationFee: parseFloat(document.getElementById('opd_consultation_fee').value || 0),
+      medicineCost: parseFloat(document.getElementById('opd_medicine_cost').value || 0),
+      testCost: parseFloat(document.getElementById('opd_test_cost').value || 0),
+      otherCost: parseFloat(document.getElementById('opd_other_cost').value || 0),
+      billNumbers: document.getElementById('opd_bill_numbers').value,
+      remarks: document.getElementById('opd_remarks').value
+    }
+    
+    const headers = { 'Content-Type': 'application/json' }
+    if (AUTH_STATE.token) headers['Authorization'] = `Bearer ${AUTH_STATE.token}`
+    
+    const response = await fetch('/api/generate-excel-opd', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(data)
+    })
+    
+    if (!response.ok) throw new Error('Generation failed')
+    
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `OPD_Claim_${data.employeeName}_${data.consultationDate}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    
+    hideLoading()
+    alert('Excel file generated successfully!')
+  } catch (error) {
+    hideLoading()
+    alert('Failed to generate Excel: ' + error.message)
+  }
+}
+
+async function submitOPDClaim() {
+  try {
+    if (!confirm('Submit this OPD claim?')) return
+    
+    showLoading('Submitting claim...')
+    
+    const data = {
+      claim_type: 'opd',
+      employeeName: document.getElementById('opd_employee_name').value,
+      patientName: document.getElementById('opd_patient_name').value,
+      relation: document.getElementById('opd_relation').value,
+      consultationDate: document.getElementById('opd_consultation_date').value,
+      doctorName: document.getElementById('opd_doctor_name').value,
+      hospitalName: document.getElementById('opd_hospital_name').value,
+      ailment: document.getElementById('opd_ailment').value,
+      totalAmount: parseFloat(document.getElementById('opd_consultation_fee').value || 0) +
+                   parseFloat(document.getElementById('opd_medicine_cost').value || 0) +
+                   parseFloat(document.getElementById('opd_test_cost').value || 0) +
+                   parseFloat(document.getElementById('opd_other_cost').value || 0),
+      formData: {
+        patientName: document.getElementById('opd_patient_name').value,
+        relation: document.getElementById('opd_relation').value,
+        consultationDate: document.getElementById('opd_consultation_date').value,
+        doctorName: document.getElementById('opd_doctor_name').value,
+        hospitalName: document.getElementById('opd_hospital_name').value,
+        ailment: document.getElementById('opd_ailment').value,
+        consultationFee: document.getElementById('opd_consultation_fee').value,
+        medicineCost: document.getElementById('opd_medicine_cost').value,
+        testCost: document.getElementById('opd_test_cost').value,
+        otherCost: document.getElementById('opd_other_cost').value,
+        billNumbers: document.getElementById('opd_bill_numbers').value,
+        remarks: document.getElementById('opd_remarks').value
+      }
+    }
+    
+    const result = await apiCall('/api/claims', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+    
+    hideLoading()
+    alert(`OPD Claim submitted successfully!\n\nClaim ID: ${result.claim_id}\nTotal: ₹${data.totalAmount.toLocaleString('en-IN')}`)
+    showDashboard()
+  } catch (error) {
+    hideLoading()
+    alert('Failed to submit claim: ' + error.message)
+  }
+}
+
+// ===== CONTINGENCY CLAIM FORM =====
+function showContingencyClaimForm() {
+  document.getElementById('app').innerHTML = `
+    <div class="min-h-screen bg-gray-50">
+      <nav class="bg-orange-700 text-white shadow-lg">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+          <div class="flex items-center gap-4">
+            <div class="bg-white rounded-lg p-2">
+              <svg width="40" height="40" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <rect fill="#1E3A8A" width="100" height="100" rx="10"/>
+                <text x="50" y="65" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#FFFFFF" text-anchor="middle">HPX</text>
+              </svg>
+            </div>
+            <div>
+              <h1 class="text-2xl font-bold">Contingency Claim</h1>
+              <p class="text-sm text-orange-200">${AUTH_STATE.user.employee_name}</p>
+            </div>
+          </div>
+          <button onclick="showDashboard()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg">
+            <i class="fas fa-home mr-2"></i>Dashboard
+          </button>
+        </div>
+      </nav>
+      
+      <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <form id="contingencyClaimForm" class="space-y-6">
+          <!-- Employee Details -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Employee Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Employee Name</label>
+                <input type="text" id="cont_employee_name" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.employee_name}" readonly>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Employee Code</label>
+                <input type="text" id="cont_employee_code" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.employee_code}" readonly>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Designation</label>
+                <input type="text" id="cont_designation" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.designation}" readonly>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                <input type="text" id="cont_department" class="w-full px-4 py-2 border rounded-lg" value="${AUTH_STATE.user.department}" readonly>
+              </div>
+            </div>
+          </div>
+
+          <!-- Claim Details -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Claim Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Claim Date *</label>
+                <input type="date" id="cont_claim_date" class="w-full px-4 py-2 border rounded-lg" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Expense Category *</label>
+                <select id="cont_category" class="w-full px-4 py-2 border rounded-lg" required>
+                  <option value="">Select Category</option>
+                  <option value="Office Supplies">Office Supplies</option>
+                  <option value="Entertainment">Entertainment</option>
+                  <option value="Communication">Communication</option>
+                  <option value="Professional Services">Professional Services</option>
+                  <option value="Miscellaneous">Miscellaneous</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Purpose of Expense *</label>
+                <input type="text" id="cont_purpose" class="w-full px-4 py-2 border rounded-lg" placeholder="Brief description of the purpose" required>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expense Items -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Expense Items</h2>
+            <div class="space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="md:col-span-2">
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Item Description *</label>
+                  <input type="text" id="cont_item_desc" class="w-full px-4 py-2 border rounded-lg" required>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Amount (₹) *</label>
+                  <input type="number" id="cont_item_amount" class="w-full px-4 py-2 border rounded-lg" required>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Vendor/Supplier Name</label>
+                  <input type="text" id="cont_vendor" class="w-full px-4 py-2 border rounded-lg">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Bill/Invoice Number</label>
+                  <input type="text" id="cont_bill_no" class="w-full px-4 py-2 border rounded-lg">
+                </div>
+              </div>
+            </div>
+            <div class="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p class="text-lg font-bold text-blue-900">Total Claim Amount: ₹<span id="cont_total_amount">0</span></p>
+            </div>
+          </div>
+
+          <!-- Justification -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Justification</h2>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Business Justification *</label>
+              <textarea id="cont_justification" rows="4" class="w-full px-4 py-2 border rounded-lg" placeholder="Explain why this expense was necessary for business purposes..." required></textarea>
+            </div>
+          </div>
+
+          <!-- Additional Information -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Additional Information</h2>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Remarks</label>
+              <textarea id="cont_remarks" rows="2" class="w-full px-4 py-2 border rounded-lg" placeholder="Any additional information..."></textarea>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex gap-4">
+              <button type="button" onclick="generateContingencyExcel()" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg">
+                <i class="fas fa-file-excel mr-2"></i>Generate Excel
+              </button>
+              <button type="button" onclick="submitContingencyClaim()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">
+                <i class="fas fa-paper-plane mr-2"></i>Submit Claim
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  `
+  
+  // Auto-update total
+  document.getElementById('cont_item_amount').addEventListener('input', (e) => {
+    document.getElementById('cont_total_amount').textContent = parseFloat(e.target.value || 0).toLocaleString('en-IN')
+  })
+}
+
+async function generateContingencyExcel() {
+  try {
+    showLoading('Generating Excel...')
+    
+    const data = {
+      employeeName: document.getElementById('cont_employee_name').value,
+      employeeCode: document.getElementById('cont_employee_code').value,
+      designation: document.getElementById('cont_designation').value,
+      department: document.getElementById('cont_department').value,
+      claimDate: document.getElementById('cont_claim_date').value,
+      category: document.getElementById('cont_category').value,
+      purpose: document.getElementById('cont_purpose').value,
+      itemDescription: document.getElementById('cont_item_desc').value,
+      amount: parseFloat(document.getElementById('cont_item_amount').value || 0),
+      vendor: document.getElementById('cont_vendor').value,
+      billNumber: document.getElementById('cont_bill_no').value,
+      justification: document.getElementById('cont_justification').value,
+      remarks: document.getElementById('cont_remarks').value
+    }
+    
+    const headers = { 'Content-Type': 'application/json' }
+    if (AUTH_STATE.token) headers['Authorization'] = `Bearer ${AUTH_STATE.token}`
+    
+    const response = await fetch('/api/generate-excel-contingency', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(data)
+    })
+    
+    if (!response.ok) throw new Error('Generation failed')
+    
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Contingency_Claim_${data.employeeName}_${data.claimDate}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    
+    hideLoading()
+    alert('Excel file generated successfully!')
+  } catch (error) {
+    hideLoading()
+    alert('Failed to generate Excel: ' + error.message)
+  }
+}
+
+async function submitContingencyClaim() {
+  try {
+    if (!confirm('Submit this contingency claim?')) return
+    
+    showLoading('Submitting claim...')
+    
+    const data = {
+      claim_type: 'contingency',
+      employeeName: document.getElementById('cont_employee_name').value,
+      claimDate: document.getElementById('cont_claim_date').value,
+      category: document.getElementById('cont_category').value,
+      purpose: document.getElementById('cont_purpose').value,
+      totalAmount: parseFloat(document.getElementById('cont_item_amount').value || 0),
+      formData: {
+        claimDate: document.getElementById('cont_claim_date').value,
+        category: document.getElementById('cont_category').value,
+        purpose: document.getElementById('cont_purpose').value,
+        itemDescription: document.getElementById('cont_item_desc').value,
+        amount: document.getElementById('cont_item_amount').value,
+        vendor: document.getElementById('cont_vendor').value,
+        billNumber: document.getElementById('cont_bill_no').value,
+        justification: document.getElementById('cont_justification').value,
+        remarks: document.getElementById('cont_remarks').value
+      }
+    }
+    
+    const result = await apiCall('/api/claims', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+    
+    hideLoading()
+    alert(`Contingency Claim submitted successfully!\n\nClaim ID: ${result.claim_id}\nTotal: ₹${data.totalAmount.toLocaleString('en-IN')}`)
+    showDashboard()
+  } catch (error) {
+    hideLoading()
+    alert('Failed to submit claim: ' + error.message)
   }
 }
 

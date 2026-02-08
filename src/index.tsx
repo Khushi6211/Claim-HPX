@@ -434,7 +434,7 @@ app.get('/api/claims/summary', requireAuth, async (c) => {
 })
 
 // ===== EXCEL GENERATION (NEW FORMAT) =====
-app.post('/api/generate-excel', async (c) => {
+app.post('/api/generate-excel', requireAuth, async (c) => {
   try {
     const data = await c.req.json() as TourAllowanceData
     
@@ -458,11 +458,11 @@ app.post('/api/generate-excel', async (c) => {
 })
 
 // Generate OPD Medical Excel
-app.post('/api/generate-excel-opd', async (c) => {
+app.post('/api/generate-excel-opd', requireAuth, async (c) => {
   try {
-    const data = await c.req.json() as OPDMedicalData
+    const data = await c.req.json() as any
     const buffer = await generateOPDMedicalExcel(data)
-    const filename = sanitizeFilename(`OPD_Medical_${data.employeeName}_${data.dateOfClaim}.xlsx`)
+    const filename = sanitizeFilename(`OPD_Medical_${data.employeeName}_${data.consultationDate}.xlsx`)
     
     return new Response(buffer, {
       headers: {
@@ -477,11 +477,11 @@ app.post('/api/generate-excel-opd', async (c) => {
 })
 
 // Generate Contingency Excel
-app.post('/api/generate-excel-contingency', async (c) => {
+app.post('/api/generate-excel-contingency', requireAuth, async (c) => {
   try {
-    const data = await c.req.json() as ContingencyData
+    const data = await c.req.json() as any
     const buffer = await generateContingencyExcel(data)
-    const filename = sanitizeFilename(`Contingency_${data.employeeName}_${data.dateOfClaim}.xlsx`)
+    const filename = sanitizeFilename(`Contingency_${data.employeeName}_${data.claimDate}.xlsx`)
     
     return new Response(buffer, {
       headers: {
