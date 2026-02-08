@@ -3,7 +3,9 @@ import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { hashPassword, verifyPassword, createSession, verifySession, hashToken, User } from './auth'
 import { sanitizeExcelValue, sanitizeFilename, validateInput, validatePassword } from './security'
-import { generateTourAllowanceExcel, TourAllowanceData } from './excel-new-format'
+import { generateTourAllowanceExcel, TourAllowanceData } from './excel-tour-print-ready'
+import { generateOPDMedicalExcel, OPDMedicalData } from './excel-opd-medical'
+import { generateContingencyExcel, ContingencyData } from './excel-contingency'
 
 type Bindings = {
   DB: D1Database;
@@ -320,34 +322,57 @@ app.post('/api/claims', requireAuth, async (c) => {
     const user = c.get('user') as User
     const claimData = await c.req.json()
     
-    // Calculate totals server-side
-    const journeyTotal = (claimData.journeys || []).reduce((sum: number, j: any) => sum + (j.amount || 0), 0)
-    const miscTotal = (claimData.miscExpenses || []).reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
-    const conveyanceTotal = (claimData.conveyances || []).reduce((sum: number, c: any) => sum + (c.amount || 0), 0)
-    const daTotal = (claimData.daDetails || []).reduce((sum: number, d: any) => sum + (d.daysForDA * d.ratePerDay), 0)
-    const hotelTotal = (claimData.daDetails || []).reduce((sum: number, d: any) => sum + (d.hotelAmount || 0), 0)
+    const claimType = claimData.claim_type || 'tour'
+    const claimPeriod = claimData.periodOfClaim || claimData.dateOfClaim || new Date().toISOString().split('T')[0]
+    const purpose = claimData.purposeOfTravel || claimData.purpose || ''
     
-    const totalClaimed = journeyTotal + miscTotal + conveyanceTotal + daTotal + hotelTotal
-    const netClaim = totalClaimed - (claimData.advanceDrawn || 0)
+    // Calculate totals based on claim type
+    let totalAmount = 0
+    let journeyAmount = 0
+    let hotelAmount = 0
+    let conveyanceAmount = 0
+    let daAmount = 0
+    let otherAmount = 0
+    
+    if (claimType === 'tour') {
+      journeyAmount = (claimData.journeys || []).reduce((sum: number, j: any) => sum + (j.amountClaimed || j.amount || 0), 0)
+      const miscTotal = (claimData.miscExpenses || []).reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+      conveyanceAmount = (claimData.conveyances || []).reduce((sum: number, c: any) => sum + (c.amount || 0), 0)
+      daAmount = (claimData.daEntries || []).reduce((sum: number, d: any) => sum + (d.daAmount || 0), 0)
+      hotelAmount = (claimData.daEntries || []).reduce((sum: number, d: any) => sum + (d.hotelAmount || 0), 0)
+      otherAmount = miscTotal
+      totalAmount = journeyAmount + hotelAmount + conveyanceAmount + daAmount + otherAmount
+    } else if (claimType === 'opd') {
+      totalAmount = claimData.totalAmount || 0
+    } else if (claimType === 'contingency') {
+      totalAmount = claimData.totalAmount || 0
+    }
     
     // Store in claims table
     const result = await c.env.DB.prepare(`
       INSERT INTO claims (
-        user_id, claim_data, total_amount, net_claim, status, submitted_at
-      ) VALUES (?, ?, ?, ?, ?, datetime('now'))
+        user_id, claim_type, claim_period, purpose_of_travel,
+        total_amount, journey_amount, hotel_amount, conveyance_amount,
+        da_amount, other_amount, form_data, submitted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).bind(
       user.id,
-      JSON.stringify(claimData),
-      totalClaimed,
-      netClaim,
-      'submitted'
+      claimType,
+      claimPeriod,
+      purpose,
+      totalAmount,
+      journeyAmount,
+      hotelAmount,
+      conveyanceAmount,
+      daAmount,
+      otherAmount,
+      JSON.stringify(claimData)
     ).run()
     
     return c.json({
       success: true,
       claim_id: result.meta.last_row_id,
-      totalClaimed,
-      netClaim
+      totalAmount
     })
   } catch (error) {
     console.error('Submit claim error:', error)
@@ -417,7 +442,7 @@ app.post('/api/generate-excel', async (c) => {
     const buffer = await generateTourAllowanceExcel(data)
     
     // SECURITY: Sanitize filename
-    const filename = sanitizeFilename(`Tour_Allowance_${data.employeeName}_${data.dateOfClaim}`)
+    const filename = sanitizeFilename(`Tour_Allowance_${data.employeeName}_${data.dateOfClaim}.xlsx`)
     
     return new Response(buffer, {
       headers: {
@@ -429,6 +454,44 @@ app.post('/api/generate-excel', async (c) => {
   } catch (error) {
     console.error('Error generating Excel:', error)
     return c.json({ error: 'Failed to generate Excel file' }, 500)
+  }
+})
+
+// Generate OPD Medical Excel
+app.post('/api/generate-excel-opd', async (c) => {
+  try {
+    const data = await c.req.json() as OPDMedicalData
+    const buffer = await generateOPDMedicalExcel(data)
+    const filename = sanitizeFilename(`OPD_Medical_${data.employeeName}_${data.dateOfClaim}.xlsx`)
+    
+    return new Response(buffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`
+      }
+    })
+  } catch (error) {
+    console.error('Error generating OPD Excel:', error)
+    return c.json({ error: 'Failed to generate OPD Excel file' }, 500)
+  }
+})
+
+// Generate Contingency Excel
+app.post('/api/generate-excel-contingency', async (c) => {
+  try {
+    const data = await c.req.json() as ContingencyData
+    const buffer = await generateContingencyExcel(data)
+    const filename = sanitizeFilename(`Contingency_${data.employeeName}_${data.dateOfClaim}.xlsx`)
+    
+    return new Response(buffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`
+      }
+    })
+  } catch (error) {
+    console.error('Error generating Contingency Excel:', error)
+    return c.json({ error: 'Failed to generate Contingency Excel file' }, 500)
   }
 })
 
@@ -447,7 +510,7 @@ app.get('/', (c) => {
     </head>
     <body class="bg-gray-50">
         <div id="app"></div>
-        <script src="/static/app-tour-allowance.js"></script>
+        <script src="/static/app-complete-minimal.js"></script>
     </body>
     </html>
   `)
