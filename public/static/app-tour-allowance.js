@@ -225,9 +225,17 @@ async function showDashboard() {
       <div class="min-h-screen bg-gray-50">
         <nav class="bg-blue-900 text-white shadow-lg">
           <div class="container mx-auto px-4 py-4 flex justify-between items-center">
-            <div>
-              <h1 class="text-2xl font-bold">HPX Tour Allowance</h1>
-              <p class="text-sm text-blue-200">${AUTH_STATE.user.employee_name} (${AUTH_STATE.user.employee_code})</p>
+            <div class="flex items-center gap-4">
+              <div class="bg-white rounded-lg p-2">
+                <svg width="40" height="40" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                  <rect fill="#1E3A8A" width="100" height="100" rx="10"/>
+                  <text x="50" y="65" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#FFFFFF" text-anchor="middle">HPX</text>
+                </svg>
+              </div>
+              <div>
+                <h1 class="text-2xl font-bold">HPX Tour Allowance</h1>
+                <p class="text-sm text-blue-200">${AUTH_STATE.user.employee_name} (${AUTH_STATE.user.employee_code})</p>
+              </div>
             </div>
             <button onclick="logout()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition duration-200">
               <i class="fas fa-sign-out-alt mr-2"></i>Logout
@@ -335,9 +343,17 @@ function showNewClaimForm() {
     <div class="min-h-screen bg-gray-50">
       <nav class="bg-blue-900 text-white shadow-lg">
         <div class="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div>
-            <h1 class="text-2xl font-bold">New Tour Allowance Claim</h1>
-            <p class="text-sm text-blue-200">${AUTH_STATE.user.employee_name}</p>
+          <div class="flex items-center gap-4">
+            <div class="bg-white rounded-lg p-2">
+              <svg width="40" height="40" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <rect fill="#1E3A8A" width="100" height="100" rx="10"/>
+                <text x="50" y="65" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#FFFFFF" text-anchor="middle">HPX</text>
+              </svg>
+            </div>
+            <div>
+              <h1 class="text-2xl font-bold">New Tour Allowance Claim</h1>
+              <p class="text-sm text-blue-200">${AUTH_STATE.user.employee_name}</p>
+            </div>
           </div>
           <div class="space-x-2">
             <button onclick="saveDraft()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg">
@@ -811,11 +827,107 @@ async function showMyDrafts() {
       return
     }
     
-    // Show drafts modal (simplified)
-    alert(`You have ${result.drafts.length} drafts. Feature coming soon!`)
+    // Create modal overlay
+    const modalHTML = `
+      <div id="draftsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center">
+            <h2 class="text-2xl font-bold">
+              <i class="fas fa-folder-open mr-2"></i>My Drafts (${result.drafts.length})
+            </h2>
+            <button onclick="closeMyDraftsModal()" class="text-white hover:text-gray-200">
+              <i class="fas fa-times text-2xl"></i>
+            </button>
+          </div>
+          <div class="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+            <div class="grid gap-4">
+              ${result.drafts.map(draft => `
+                <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div class="flex justify-between items-start">
+                    <div class="flex-1">
+                      <h3 class="font-bold text-lg text-gray-800">${draft.draft_name || 'Untitled Draft'}</h3>
+                      <p class="text-sm text-gray-500 mt-1">
+                        <i class="fas fa-clock mr-1"></i>Last updated: ${new Date(draft.updated_at).toLocaleString('en-IN')}
+                      </p>
+                      <p class="text-sm text-gray-500">
+                        <i class="fas fa-calendar mr-1"></i>Created: ${new Date(draft.created_at).toLocaleString('en-IN')}
+                      </p>
+                    </div>
+                    <div class="flex gap-2">
+                      <button onclick="loadDraft(${draft.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
+                        <i class="fas fa-edit mr-1"></i>Load
+                      </button>
+                      <button onclick="deleteDraft(${draft.id})" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm">
+                        <i class="fas fa-trash mr-1"></i>Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="bg-gray-50 px-6 py-4 flex justify-end">
+            <button onclick="closeMyDraftsModal()" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML)
   } catch (error) {
     hideLoading()
     alert('Failed to load drafts: ' + error.message)
+  }
+}
+
+function closeMyDraftsModal() {
+  const modal = document.getElementById('draftsModal')
+  if (modal) modal.remove()
+}
+
+async function loadDraft(draftId) {
+  try {
+    showLoading('Loading draft...')
+    const draft = await apiCall(`/api/drafts/${draftId}`)
+    hideLoading()
+    
+    APP_STATE.currentDraftId = draftId
+    APP_STATE.formData = JSON.parse(draft.form_data || '{}')
+    
+    closeMyDraftsModal()
+    showNewClaimForm()
+    
+    // Populate form with draft data
+    setTimeout(() => {
+      Object.keys(APP_STATE.formData).forEach(key => {
+        const input = document.getElementById(key)
+        if (input) input.value = APP_STATE.formData[key]
+      })
+    }, 100)
+    
+    alert('Draft loaded successfully!')
+  } catch (error) {
+    hideLoading()
+    alert('Failed to load draft: ' + error.message)
+  }
+}
+
+async function deleteDraft(draftId) {
+  if (!confirm('Are you sure you want to delete this draft?')) return
+  
+  try {
+    showLoading('Deleting draft...')
+    await apiCall(`/api/drafts/${draftId}`, { method: 'DELETE' })
+    hideLoading()
+    
+    closeMyDraftsModal()
+    alert('Draft deleted successfully!')
+    showMyDrafts() // Refresh the list
+  } catch (error) {
+    hideLoading()
+    alert('Failed to delete draft: ' + error.message)
   }
 }
 

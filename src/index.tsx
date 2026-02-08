@@ -510,7 +510,7 @@ app.get('/', (c) => {
     </head>
     <body class="bg-gray-50">
         <div id="app"></div>
-        <script src="/static/app-complete-minimal.js"></script>
+        <script src="/static/app-tour-allowance.js"></script>
     </body>
     </html>
   `)
