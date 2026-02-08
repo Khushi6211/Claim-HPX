@@ -284,13 +284,21 @@ async function showDashboard() {
           
           <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <h2 class="text-xl font-bold text-gray-800 mb-4">Quick Actions</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button onclick="showNewClaimForm()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg transition duration-200 flex items-center justify-center">
-                <i class="fas fa-plus-circle mr-3 text-xl"></i>
-                <span>New Tour Allowance Claim</span>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <button onclick="showNewClaimForm('tour')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg transition duration-200 flex flex-col items-center justify-center">
+                <i class="fas fa-plane text-3xl mb-2"></i>
+                <span>Tour Allowance</span>
               </button>
-              <button onclick="showMyDrafts()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 px-6 rounded-lg transition duration-200 flex items-center justify-center">
-                <i class="fas fa-folder-open mr-3 text-xl"></i>
+              <button onclick="showNewClaimForm('opd')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded-lg transition duration-200 flex flex-col items-center justify-center">
+                <i class="fas fa-hospital text-3xl mb-2"></i>
+                <span>OPD Medical Claim</span>
+              </button>
+              <button onclick="showNewClaimForm('contingency')" class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 px-6 rounded-lg transition duration-200 flex flex-col items-center justify-center">
+                <i class="fas fa-receipt text-3xl mb-2"></i>
+                <span>Contingency Claim</span>
+              </button>
+              <button onclick="showMyDrafts()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 px-6 rounded-lg transition duration-200 flex flex-col items-center justify-center">
+                <i class="fas fa-folder-open text-3xl mb-2"></i>
                 <span>My Drafts</span>
               </button>
             </div>
@@ -333,11 +341,23 @@ async function showDashboard() {
 }
 
 // ===== NEW CLAIM FORM (5 SECTIONS) =====
-function showNewClaimForm() {
+function showNewClaimForm(claimType = 'tour') {
   APP_STATE.currentView = 'form'
   APP_STATE.currentDraftId = null
   APP_STATE.receipts = []
   APP_STATE.formData = {}
+  APP_STATE.currentClaimType = claimType
+  
+  // For OPD and Contingency - show coming soon
+  if (claimType === 'opd') {
+    alert('OPD Medical Claim form is under development.\n\nExpected features:\n- Patient details\n- Medical expenses\n- Doctor/Hospital information\n- Bill attachments\n\nPlease use Tour Allowance for now.')
+    return
+  }
+  
+  if (claimType === 'contingency') {
+    alert('Contingency Claim form is under development.\n\nExpected features:\n- Purpose and category\n- Expense details\n- Department approval\n- Supporting documents\n\nPlease use Tour Allowance for now.')
+    return
+  }
   
   document.getElementById('app').innerHTML = `
     <div class="min-h-screen bg-gray-50">
@@ -769,13 +789,24 @@ async function generateExcel() {
     showLoading('Generating Excel...')
     const data = collectFormData()
     
+    const headers = { 
+      'Content-Type': 'application/json'
+    }
+    
+    if (AUTH_STATE.token) {
+      headers['Authorization'] = `Bearer ${AUTH_STATE.token}`
+    }
+    
     const response = await fetch('/api/generate-excel', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify(data)
     })
     
-    if (!response.ok) throw new Error('Generation failed')
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error('Generation failed: ' + errorText)
+    }
     
     const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
