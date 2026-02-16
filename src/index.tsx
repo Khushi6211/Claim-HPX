@@ -436,7 +436,51 @@ app.get('/api/claims/summary', requireAuth, async (c) => {
 // ===== EXCEL GENERATION (NEW FORMAT) =====
 app.post('/api/generate-excel', requireAuth, async (c) => {
   try {
-    const data = await c.req.json() as TourAllowanceData
+    const rawData = await c.req.json() as any
+    
+    // Transform frontend data to match Excel generator interface
+    const data: TourAllowanceData = {
+      employeeName: rawData.employeeName || '',
+      designation: rawData.designation || '',
+      empId: rawData.empId || '',
+      grade: rawData.grade || '',
+      department: rawData.department || '',
+      dateOfClaim: rawData.dateOfClaim || '',
+      periodOfClaim: rawData.periodOfClaim || '',
+      purposeOfTravel: rawData.purposeOfTravel || '',
+      miscExpenses: (rawData.miscExpenses || []).map((m: any) => ({
+        particulars: m.particulars || '',
+        amount: parseFloat(m.amount) || 0
+      })),
+      journeys: (rawData.journeys || []).map((j: any) => ({
+        departureFrom: j.departureStation || '',
+        arrivalTo: j.arrivalStation || '',
+        date: j.departureDate || '',
+        modeOfTravel: j.modeClass || '',
+        classOfTravel: j.modeClass || '',
+        trainFlightNo: j.trainNo || '',
+        amountClaimed: parseFloat(j.amount) || 0,
+        purpose: j.purpose || ''
+      })),
+      daEntries: (rawData.daDetails || []).map((d: any) => ({
+        date: d.dates || '',
+        station: d.station || '',
+        daAmount: parseFloat(d.daysForDA || 0) * parseFloat(d.ratePerDay || 0),
+        hotelAmount: parseFloat(d.hotelAmount) || 0,
+        hotelName: d.hotelName || '',
+        billNo: d.billNo || ''
+      })),
+      conveyances: (rawData.conveyances || []).map((c: any) => ({
+        date: c.date || '',
+        station: c.station || '',
+        placeOfVisit: `${c.placeFrom || ''} to ${c.placeTo || ''}`,
+        distanceKm: parseFloat(c.distanceKm) || 0,
+        meansOfTravel: c.meansOfTravel || '',
+        amount: parseFloat(c.amount) || 0,
+        purpose: c.purpose || ''
+      })),
+      advanceDrawn: parseFloat(rawData.advanceDrawn) || 0
+    }
     
     // Generate Excel with new format
     const buffer = await generateTourAllowanceExcel(data)
@@ -453,7 +497,7 @@ app.post('/api/generate-excel', requireAuth, async (c) => {
     
   } catch (error) {
     console.error('Error generating Excel:', error)
-    return c.json({ error: 'Failed to generate Excel file' }, 500)
+    return c.json({ error: 'Failed to generate Excel file', details: error.message }, 500)
   }
 })
 
